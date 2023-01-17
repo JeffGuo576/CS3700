@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+import socket       
+import json   
+import argparse 
+import ssl
+ 
+
+#Sends the hello message to the server
+def helloMessage(username):
+  hello = '{"type": "hello", "northeastern_username": "' + username + '"}\n'
+  s.send(hello.encode())
+
+#Opens the text file of words and converts it into a list
+my_file = open("project1-words.txt", "r")
+project1words = my_file.read()
+list_of_words = project1words.split()
+print(len(list_of_words))
+
+#Filters the list of words based on the mark
+def filterword(position, mark, letter):
+    #remove all the words that contain this letter in this position
+    if mark == 0:
+      for word in list_of_words[:]:
+        if(word[position] == letter):
+          list_of_words.remove(word)
+    if mark == 2:
+      for word in list_of_words[:]:
+        if(word[position] != letter):
+          list_of_words.remove(word)
+    return list_of_words
+  
+
+#Makes a guess
+def guess(gameid, word):
+  guessword = '{"type": "guess", "id": "' + gameid + '","word": "' + word + '"}\n'
+  s.send(guessword.encode())
+  data = s.recv(1024).decode()
+  data = json.loads(data)
+  if data["type"] == "retry":
+    guess1 = data["guesses"]
+    for values in guess1:
+      marks= values["marks"]
+    filterword(0 , marks[0], word[0])
+    filterword(1 , marks[1], word[1])
+    filterword(2 , marks[2], word[2])
+    filterword(3 , marks[3], word[3])
+    filterword(4 , marks[4], word[4])
+    guess(gameid, list_of_words[0])
+  if data["type"] == "bye":
+    secret_flag = data["flag"]
+    return print(secret_flag)
+
+#./client <-p port> <-s> <hostname> <Northeastern-username>
+if __name__ == "__main__":
+  parser = argparse.ArgumentParser()
+  parser.add_argument('-p', dest='port', type = int)
+  parser.add_argument('-s', action = "store_true", default = False, dest = 'ssl')
+  parser.add_argument('hostname')
+  parser.add_argument('username')
+  args = parser.parse_args()
+  hostname = args['hostname']
+  username = args['username']
+
+  port = 27993
+  if args.port:
+    port = args.port
+  elif args.ssl:
+    port = 27994
+  s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)   
+  
+  s.connect(hostname, port)
+
+  if args.ssl:
+    s = ssl.wrap_socket(s)
+
+  helloMessage(username)
+  data = (s.recv(1024).decode())
+  data = json.loads(data)
+  id = data["id"]
+  guess(id, "raise")
+  s.close
+
+
+
+
+
+
+
+
+
+ 
