@@ -52,6 +52,7 @@ def guess(gameid, word):
 
 #./client <-p port> <-s> <hostname> <Northeastern-username>
 if __name__ == "__main__":
+  #Setting up the commandline syntax
   parser = argparse.ArgumentParser()
   parser.add_argument('-p', dest='port', type = int)
   parser.add_argument('-s', action = "store_true", default = False, dest = 'ssl')
@@ -62,13 +63,14 @@ if __name__ == "__main__":
   username = args['username']
 
   port = 27993
+  #If -s is specified and -p is not specified use port 27994
   if args.port:
     port = args.port
   elif args.ssl:
     port = 27994
   s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)   
   
-  s.connect(hostname, port)
+  s.connect((hostname, port))
 
   if args.ssl:
     s = ssl.wrap_socket(s)
