@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 import socket       
 import json   
 import argparse 
@@ -54,40 +54,34 @@ def guess(gameid, word):
 if __name__ == "__main__":
   #Setting up the commandline syntax
   parser = argparse.ArgumentParser()
-  parser.add_argument('-p', dest='port', type = int)
-  parser.add_argument('-s', action = "store_true", default = False, dest = 'ssl')
-  parser.add_argument('hostname')
-  parser.add_argument('username')
+  parser.add_argument("-p", dest="port", type = int)
+  parser.add_argument("-s", dest= "ssl", action = "store_true", default = False)
+  parser.add_argument("hostname", type = str)
+  parser.add_argument("username", type = str)
   args = parser.parse_args()
-  hostname = args['hostname']
-  username = args['username']
+  hostname = args.hostname
+  username = args.username
+  print(hostname)
+  print(username)
 
+
+#If -s is specified and -p is not specified use port 27994
   port = 27993
-  #If -s is specified and -p is not specified use port 27994
   if args.port:
     port = args.port
   elif args.ssl:
     port = 27994
-  s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)   
+  s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  
   
-  s.connect((hostname, port))
-
   if args.ssl:
     s = ssl.wrap_socket(s)
-
+  print(s)
+  s.connect((hostname, port))
+  
   helloMessage(username)
   data = (s.recv(1024).decode())
   data = json.loads(data)
   id = data["id"]
+  print(data)
   guess(id, "raise")
   s.close
-
-
-
-
-
-
-
-
-
- 
