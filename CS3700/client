@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 import socket       
 import json   
 import argparse 
@@ -14,7 +14,6 @@ def helloMessage(username):
 my_file = open("project1-words.txt", "r")
 project1words = my_file.read()
 list_of_words = project1words.split()
-print(len(list_of_words))
 
 #Filters the list of words based on the mark
 def filterword(position, mark, letter):
@@ -61,9 +60,6 @@ if __name__ == "__main__":
   args = parser.parse_args()
   hostname = args.hostname
   username = args.username
-  print(hostname)
-  print(username)
-
 
 #If -s is specified and -p is not specified use port 27994
   port = 27993
@@ -72,16 +68,12 @@ if __name__ == "__main__":
   elif args.ssl:
     port = 27994
   s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  
-  
   if args.ssl:
     s = ssl.wrap_socket(s)
-  print(s)
   s.connect((hostname, port))
-  
   helloMessage(username)
   data = (s.recv(1024).decode())
   data = json.loads(data)
   id = data["id"]
-  print(data)
   guess(id, "raise")
   s.close
