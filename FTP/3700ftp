@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+import socket
+import argparse
+from urllib.parse import urlparse
+import os
+
+
+#Gets the given username and sends it to the server
+#USER <username>\r\n (works)
+def user_send(u):
+    data =('USER ' + u + '\r\n')
+    control_channel.send(data.encode())
+    RECV()
+
+
+#Gets the given password and sends it to the server
+def password_send(p):
+    data = ('PASS ' + p + '\r\n')
+    control_channel.send(data.encode())
+    RECV()
+
+#Set the connection to 8-bit binary data mode
+def type():
+    data =('TYPE I' + '\r\n')
+    control_channel.send(data.encode())
+    return RECV()
+
+#Set the connection to stream mode
+def mode():
+    data = ('MODE S' + '\r\n')
+    control_channel.send(data.encode())
+    return RECV()
+
+#Set the connection to file-oriented mode
+def STRU():
+    data = ('STRU F' + '\r\n')
+    control_channel.send(data.encode())
+    return RECV()
+
+#List the contents of the given directory on the FTP server
+def LIST(path):
+    data = ('LIST ' + path + '\r\n')
+    control_channel.send(data.encode())
+    RECV()
+    RECV_DATA()
+
+#Delete the given file on the FTP server
+def DELE(path):
+    data = ('DELE ' + path + '\r\n')
+    print(data)
+    control_channel.send(data.encode())
+
+#Make a directory at the given path on the FTP server
+def MKD(path):
+    data = ('MKD ' + path + '\r\n')
+    control_channel.send(data.encode())
+    RECV()
+
+#Delete the directory at the given path on the FTP server
+def RMD(path):
+    data = ('RMD ' + path + '\r\n')
+    control_channel.send(data.encode()) 
+    RECV()
+
+#Upload a new file with the given path and name from the FTP server
+def STOR(path):
+    data = ('STOR ' + path + '\r\n')
+    control_channel.send(data.encode())
+    RECV()
+
+#Download a file with the given path and name from the FTP server
+def RETR(path):
+    data = ('RETR ' + path + '\r\n')
+    control_channel.send(data.encode())
+    RECV()
+
+#Ask the FTP sever to close the connection
+def QUIT():
+    data = ('QUIT\r\n')
+    control_channel.send(data.encode())
+    RECV()
+
+#Ask the FTP server to open a data channel
+def PASV():
+    try:
+        data = ('PASV\r\n')
+        control_channel.send(data.encode())
+    except:
+        print("PASV Failed")
+    
+
+#Receives data from the control channel
+def RECV():
+    while True:
+        data = control_channel.recv(1024).decode()
+        if data.endswith("\r\n"):
+            break
+    print(data)
+    return data
+    
+#Receives data from the data channel
+def RECV_DATA():
+    while True:
+        data = data_channel.recv(1024).decode()
+        if data.endswith("\n"):
+            break
+    print(data)
+
+
+#Gets the information to open the data channel.
+def RECV_data_channel_info():
+    global PASV_port
+    global PASV_host
+    data = control_channel.recv(1024).decode()
+    print(data)
+    data = data.split(',')
+    #Gets the ip address
+    data1 = data[0].split('(')
+    firstIP = str(data1[1])
+    PASV_host = firstIP + '.' + data[1] + '.' + data[2] + '.' + data[3]
+
+    #Last two numbers are the the port numbers
+    port2 = data[-1].replace(').', '')
+    port2 = port2.replace('\n', '')
+    port1 = data[-2]
+    PASV_port = (int(port1) << 8) + int(port2)
+    data_channel.connect((PASV_host, PASV_port))
+    print("Data Channel opened")
+
+#Gets the username and the password from the URL
+def parseURL(URL):
+    global password
+    global user
+    global path
+    o = urlparse(URL)
+    user = o.username
+    password = o.password
+    path = o.path
+    host = o.hostname
+
+
+if __name__ == "__main__":
+    #Control Channel, no data is uploaded or downloaded here
+    control_channel= socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+    #Data Channel, downloads any data or upload any data
+    data_channel = socket.socket(socket.AF_INET, socket.SOCK_STREAM)    
+    host = "ftp.3700.network"
+    port = 21
+    PASV_port = None
+    PASV_host = None
+    path = None
+    name = None
+    password = None
+    local = None
+
+
+    #./3700ftp [operation] [param1] [param2]
+    parser = argparse.ArgumentParser()
+    parser.add_argument("operation", type = str)
+    parser.add_argument("param1", type = str)
+    parser.add_argument("param2", type = str, default = None, nargs='?')
+    args = parser.parse_args()
+    operation = args.operation
+    param1 = args.param1
+    param2 = args.param2
+
+    #Parses the param with the URL
+    if 'ftp' in param1:
+        parseURL(param1)
+        local = param2
+    elif 'ftp' in param2:
+        parseURL(param2)
+        local = param1
+    print(user)
+    print(path)
+
+    #The initial start
+    control_channel.connect((host, port))
+    RECV()
+    user_send(user)
+    password_send(password)
+    mode()
+    type()
+    STRU()
+
+
+    if operation == 'ls':
+        PASV()
+        RECV_data_channel_info()
+        LIST(path)
+    elif operation == 'mkdir':
+        MKD(path)
+    elif operation == 'rm':
+        PASV()
+        RECV_data_channel_info()
+        DELE(path)
+    elif operation == 'rmdir':
+        RMD(path)
+    elif operation == 'cp':
+        PASV()
+        RECV_data_channel_info()
+        #FTP -> local
+        if 'ftp' in param1:
+            #Downloads the file
+            RETR(path)
+            with open(local, "wb") as file:
+                data = data_channel.recv(1024)
+                #Keep downloading
+                while data:
+                    file.write(data)
+                    data = data_channel.recv(1024)
+            file.close()
+        #local -> FTP
+        elif 'ftp' in param2:
+            #Uploads the file
+            STOR(path)
+            with open(local, "rb") as file:
+                all_data = file.read()
+                while all_data:
+                    data_channel.sendall(all_data)
+                    all_data = file.read()
+            data_channel.close()
+    elif operation == 'mv':
+        PASV()
+        #Open the data socket
+        RECV_data_channel_info()
+        #FTP -> Local
+        if 'ftp' in param1:
+            #Downloads the file
+            RETR(path)
+            with open(local, "wb") as file:
+                data = data_channel.recv(1024)
+                #Keep downloading if there is more data
+                while data:
+                    file.write(data)
+                    data = data_channel.recv(1024)
+            file.close()
+            #Deletes the file from the FTP server
+            DELE(path)
+        #Local -> FTP
+        elif 'ftp' in param2:
+            #Uploads the file
+            STOR(path)
+            with open(local, "rb") as file:
+                all_data = file.read()
+                while all_data:
+                    data_channel.sendall(all_data)
+                    all_data = file.read()
+            #Removes the file from local
+            os.remove(local)
+            data_channel.close()
+
+QUIT()
