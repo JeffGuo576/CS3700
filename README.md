@@ -4,7 +4,8 @@ Solo projects
 * Socket Basics
 * FTP Client
 
-Group project with Teresa 
+Partnered Projects \n
+Partner: Teresa
 * BGP Router
 * Reliable Transport Protocol
 * Web Crawler
