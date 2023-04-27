@@ -1,0 +1,261 @@
+#!/usr/bin/env -S python3 -u
+
+import argparse, socket, time, json, select, struct, sys, math
+
+#Test
+class Router:
+
+    # dictionary of neighbors, neighbor is the key
+    relations = {}
+    sockets = {}
+    ports = {}
+    forwarding_table = [] # list of dictionaries
+    withdraws = []
+
+    def __init__(self, asn, connections):
+        print("Router at AS %s starting up" % asn)
+        self.asn = asn
+
+        # finding the relationship between this router to every neighboring router
+        for relationship in connections:
+            port, neighbor, relation = relationship.split("-")
+
+            self.sockets[neighbor] = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # open UDP socket
+            self.sockets[neighbor].bind(('localhost', 0)) # connects this router to neighbor
+            self.ports[neighbor] = int(port) 
+            self.relations[neighbor] = relation
+            self.send(neighbor, json.dumps({ "type": "handshake", "src": self.our_addr(neighbor), "dst": neighbor, "msg": {}  }))
+
+    def our_addr(self, dst):
+        quads = list(int(qdn) for qdn in dst.split('.'))
+        quads[3] = 1
+        return "%d.%d.%d.%d" % (quads[0], quads[1], quads[2], quads[3])
+
+    def send(self, network, message):
+        self.sockets[network].sendto(message.encode('utf-8'), ('localhost', self.ports[network]))
+
+    def run(self):
+        while True:
+            socks = select.select(self.sockets.values(), [], [], 0.1)[0] # 
+            for conn in socks:
+                k, addr = conn.recvfrom(65535)
+                srcif = None
+                for sock in self.sockets:
+                    if self.sockets[sock] == conn:
+                        srcif = sock # srcif is a socket
+                        break
+                print("Received message '%s' from %s" % (k, srcif))
+                loaded_msg = json.loads(k)
+                msg_type = loaded_msg["type"]
+                # performs depending on type of message router receives
+                if msg_type == "update":
+                    self.update(loaded_msg, srcif)
+                elif msg_type == "data":
+                    self.data(loaded_msg, srcif)
+                elif msg_type == "dump":
+                    self.dump(loaded_msg)
+                elif msg_type == "withdraw":
+                    self.withdraw(loaded_msg, srcif)
+                else:
+                    print("Message Error")
+        return
+
+    # Sends an update message depening on who sent the message
+    def update(self, msg, scrif):
+        self.append_table(msg)
+
+        if self.relations[scrif] == "cust":
+            for socket in self.sockets.keys():
+                if socket != scrif:
+                    forward = {"msg": {"netmask":msg["msg"]["netmask"],
+                                "ASPath": [self.asn] + msg["msg"]["ASPath"],
+                                "network":msg["msg"]["network"]},
+                                "src":self.our_addr(socket),
+                                "dst":socket,
+                                "type":msg["type"]}
+                    self.send(socket , json.dumps(forward))
+        else: 
+            for socket in self.sockets.keys():
+                if self.relations[socket] == "cust":
+                    if socket != scrif:
+                        forward = {"msg": {"netmask":msg["msg"]["netmask"],
+                                "ASPath": [self.asn] + msg["msg"]["ASPath"],
+                                "network":msg["msg"]["network"]},
+                                "src":self.our_addr(socket),
+                                "dst":socket,
+                                "type":msg["type"]}
+                        self.send(socket, json.dumps(forward))
+        return
+    
+    # Copies announcement and adds to the forward table
+    def append_table(self, msg):
+        forward = {"network":msg["msg"]["network"],
+                           "netmask":msg["msg"]["netmask"],
+                           "localpref":msg["msg"]["localpref"],
+                           "selfOrigin":msg["msg"]["selfOrigin"],
+                           "ASPath":msg["msg"]["ASPath"],
+                           "origin":msg["msg"]["origin"],
+                           "peer": msg["src"]}
+        self.forwarding_table.append(forward)
+    
+    # chooses the best route to send data
+    def data(self, msg, srcif):
+        current_route = None
+        peerList = [] # list of each peer's sources
+        routes = []
+        possible_routes = []
+        
+        for peers in self.forwarding_table:
+            if(peers["peer"] in peerList):
+                pass
+            else:
+                peerList.append(peers["peer"])
+        
+        for other_route in self.forwarding_table:
+            if other_route["peer"] in peerList:
+                possible_routes.append(other_route)
+            
+        for other_route in possible_routes:
+            network = other_route["network"]
+            other_netmask = other_route["netmask"]
+            dst = msg["dst"]
+            convert1 = struct.unpack(">I", socket.inet_aton(network))[0]
+            convert2 = struct.unpack(">I", socket.inet_aton(other_netmask))[0]
+            convert3 = struct.unpack(">I", socket.inet_aton(dst))[0]
+            #Checks if it is a valid route before sending it
+        
+            if (convert1 & convert2) == (convert3 & convert2):
+                routes.append(other_route)
+                if current_route == None:
+                    current_route = other_route
+        
+        found_route = False
+        if len(routes) > 1:
+            for other_route in routes:
+                if other_route["peer"] == current_route["peer"]:
+                    pass
+                
+                current_netmask = current_route["netmask"]
+                current_cidr = sum(bin(int(x)).count('1') for x in current_netmask.split('.'))
+                other_cidr = sum(bin(int(x)).count('1') for x in other_netmask.split('.'))
+                
+                # longest prefix
+                if other_cidr > current_cidr:
+                    current_route = other_route
+                elif other_cidr == current_cidr:
+                    
+                    # biggest localpref
+                    if other_route["localpref"] > current_route["localpref"]:
+                        current_route = other_route
+                    elif other_route["localpref"] == current_route["localpref"]:
+                        
+                        # whichever self origin is True
+                        if other_route["selfOrigin"] and not current_route["selfOrigin"]:
+                            current_route = other_route
+                        elif other_route["selfOrigin"] == current_route["selfOrigin"]:
+                            
+                            # shortest ASPath
+                            current_len = len(current_route["ASPath"])
+                            other_len = len(other_route["ASPath"])
+                            if other_len < current_len:
+                                current_route = other_route
+                            elif other_len == current_len:
+                                
+                                # Better origin
+                                current_origin = current_route["origin"]
+                                other_origin = other_route["origin"]
+                                if (other_origin == "IGP" and current_origin != "IGP") or (other_origin == "EGP" and current_origin == "UNK"):
+                                    current_route = other_route
+                                elif other_origin == current_origin:
+                                    
+                                    # shortest ip
+                                    lo_current_ip = current_route["peer"].split(".")
+                                    current_ip = lo_current_ip[-1]
+                                    print("CURRENT IP: ")
+                                    print(current_ip)
+                                    lo_other_ip = other_route["peer"].split(".")
+                                    other_ip = lo_other_ip[-1]
+                                    print("OTHER IP: ")
+                                    print(other_ip)
+                                    if other_ip <= current_ip:
+                                        current_route = other_route
+                                    #if other_ip == current_ip:
+            
+            found_route = True
+                               
+        elif len(routes) == 1:
+            current_route = routes[0]
+            found_route = True
+            #self.send(current_route["peer"], json.dumps(msg))
+        else: # when there is no route
+            forward = {"src": msg["dst"],
+                "dst": msg["src"],
+                "type": "no route",
+                "msg": {}
+                }
+            print("NO ROUTE MESSAGE")
+            self.send(msg["src"], json.dumps(forward))
+        
+        if found_route:
+            destination_relation = self.relations[current_route["peer"]]
+            source_relation = self.relations[srcif]          
+            if destination_relation == "cust" or self.relations[srcif] == "cust":
+                self.send(current_route["peer"], json.dumps(msg))
+            elif source_relation == "peer" or source_relation == "provider":
+                pass
+                
+    # sends a table msg with forwarding table
+    def dump(self, msg):
+        message = {
+            "src": msg["dst"],
+            "dst": msg["src"],
+            "type": "table",
+            "msg": self.forwarding_table,
+        }
+        self.send(msg["src"], json.dumps(message))
+    
+    # removes given networks from message from forwarding table
+    # sends withdraw messages to neighbors
+    def withdraw(self, msg, scrif):
+        table = self.forwarding_table
+        for network in msg["msg"]:
+            for forward in table: # finds network in the table
+                valid_relation = forward["peer"] == msg["src"]
+                valid_nets = forward["netmask"] == network["netmask"] and forward["network"] == network["network"]
+                if valid_relation and valid_nets:
+                    self.forwarding_table.remove(forward)
+        
+        # send withdraw announcements to neighbors
+        if self.relations[scrif] == "cust":
+            for address in self.sockets.keys():
+                if address != scrif:
+                    copy = {
+                            "src": self.our_addr(address),
+                            "dst": address,
+                            "type": "withdraw",
+                            "msg": msg["msg"]
+                        }
+                    self.withdraws.append(copy) # copies msg
+                    self.send(address , json.dumps(copy))
+        else: 
+            for address in self.sockets.keys():
+                if self.relations[address] == "cust":
+                    if address != scrif:
+                        copy = {
+                            "src": self.our_addr(address),
+                            "dst": address,
+                            "type": "withdraw",
+                            "msg": msg["msg"]
+                        }
+                        self.send(address, json.dumps(copy))
+                    
+        
+        
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='route packets')
+    parser.add_argument('asn', type=int, help="AS number of this router")
+    parser.add_argument('connections', metavar='connections', type=str, nargs='+', help="connections")
+    args = parser.parse_args()
+    router = Router(args.asn, args.connections)
+    router.run()
