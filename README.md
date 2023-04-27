@@ -1,10 +1,8 @@
-# CS3700
-
-## Solo projects
+# Solo projects
 * Socket Basics
 * FTP Client
 
-### Partnered Projects 
+## Partnered Projects 
 Partner: Teresa
 * BGP Router
 * Reliable Transport Protocol
