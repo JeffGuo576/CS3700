@@ -3,7 +3,7 @@
 * FTP Client
 
 ## Partnered Projects 
-Partner: Teresa
+Partner: Teresa 
 * BGP Router
 * Reliable Transport Protocol
 * Web Crawler
