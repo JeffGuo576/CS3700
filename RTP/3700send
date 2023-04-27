@@ -1,0 +1,114 @@
+#!/usr/bin/env -S python3 -u
+
+import argparse, socket, time, json, select, struct, sys, math
+
+from collections import defaultdict
+
+DATA_SIZE = 1375
+
+class Sender:
+    def __init__(self, host, port):
+        self.host = host
+        self.remote_port = int(port)
+        self.log("Sender starting up using port %s" % self.remote_port)
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.socket.bind(('0.0.0.0', 0))
+        self.waiting = False
+        self.sequence_number = 0
+        self.sentPackets = {}
+        self.packet_timeouts = {}
+        self.send_times = {} 
+        self.cwnd = 1
+        self.acks = {} 
+        self.first_send = True
+        self.duplicate = True 
+        self.printed = []
+        self.packet_count = 0
+        self.rtt = 1
+
+    def log(self, message):
+        sys.stderr.write(message + "\n")
+        sys.stderr.flush()
+
+    def send(self, message):
+        self.socket.sendto(json.dumps(message).encode('utf-8'), (self.host, self.remote_port))
+
+    def run(self):
+        while True:
+            sockets = [self.socket, sys.stdin] if not self.waiting and self.cwnd != 0 else [self.socket]
+            socks = select.select(sockets, [], [], 0.1)[0]
+            for conn in socks:
+                if conn == self.socket:
+                    k, addr = conn.recvfrom(65535)
+                    msg = k.decode('utf-8')
+                    msg = json.loads(json.loads(msg))
+                    #Increase window
+                    if msg['given_num'] not in self.acks:
+                        self.cwnd += 1
+                    self.log("Received message '%s'" % msg)
+                    self.acks[msg['given_num']] = True
+                    #Get all the printed acks
+                    if msg['printed']:
+                        self.printed.append(msg['given_num'])
+                    #If the ack message is already in, then its duplicate
+                    if msg['given_num'] in self.acks:
+                        self.duplicate = True
+                    self.waiting = False
+                elif conn == sys.stdin:
+                    for i in range(self.cwnd + 1):
+                        data = sys.stdin.read(DATA_SIZE)
+                        self.sequence_number += len(data)
+                        if len(data) == 0:
+                            if self.packet_count == len(self.printed):
+                                self.log("All done!")
+                                sys.exit(0)
+                            if len(self.acks) == 0:
+                                break
+
+                            received_acks = dict(filter(lambda x: x[1] == False, self.acks.items()))
+                            if len(received_acks) == 0:
+                                self.log("All done!")
+                                sys.exit(0)
+                            for i in range(self.cwnd):
+                                #Resend if no ack
+                                for num in received_acks:
+                                    msg = self.sentPackets[num]
+                                    self.send(msg)
+                                    self.sentPackets[self.sequence_number] = msg
+                                    self.send_times[self.sequence_number] = msg['send_time']
+                                    self.packet_timeouts[self.sequence_number] = self.send_times[self.sequence_number] + (2*self.rtt)
+
+                            #transmit
+                            for num in self.send_times.keys():
+                                if time.time() > self.packet_timeouts[num]:
+                                    msg = self.sentPackets[num]
+                                    self.send(msg)
+                                    self.send_times[num] = time.time()
+                                    self.packet_timeouts[num] = self.send_times[num] + (2*self.rtt)
+
+                        msg = {"seq_num": self.sequence_number,
+                                "type": "msg",
+                                "data": data, 
+                                "ack": False,
+                                "send_time": time.time()}
+                        self.log("Sending message '%s'" % msg)
+                        if self.sequence_number not in self.sentPackets and self.sequence_number not in self.acks:
+                            self.send(msg)
+                            self.packet_count += 1
+                            if self.sequence_number not in self.acks:
+                                self.acks[self.sequence_number] = False
+                            self.sentPackets[self.sequence_number] = msg
+                            self.send_times[self.sequence_number] = msg['send_time']
+                            self.packet_timeouts[self.sequence_number] = self.send_times[self.sequence_number] + (2*self.rtt)
+                        self.waiting = True
+
+
+        return
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='send data')
+    parser.add_argument('host', type=str, help="Remote host to connect to")
+    parser.add_argument('port', type=int, help="UDP port number to connect to")
+    args = parser.parse_args()
+    sender = Sender(args.host, args.port)
+    sender.run()
